@@ -1,25 +1,28 @@
 
-name: Deploy to GitHub Pages
+# .github/workflows/deploy.yml
+name: Deploy static site to GitHub Pages
 
 on:
   push:
-    branches:
-      - main   # Cambia si tu rama principal es diferente
+    branches: [ main ]
+
+permissions:
+  contents: write
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Instalar dependencias
-        run: npm install   # Si usas Node, ajusta según tu proyecto
-
-      - name: Construir proyecto
-        run: npm run build # Ajusta al comando de build de tu proyecto
-
-      - name: Deploy a GitHub Pages
+      # Si tu sitio está en la raíz del repo:
+      - name: Publicar en gh-pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: ./       # Publica la raíz (donde está index.html)
+          force_orphan: true
+
+# Después, en Settings → Pages, selecciona Deploy from a branch → gh-pages → /root
+
