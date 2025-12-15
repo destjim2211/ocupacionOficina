@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="es">
 <head>
@@ -57,6 +56,11 @@
     .mini h3{margin:0 0 8px 0;font-size:14px;color:var(--muted)}
     .mini .row{margin:4px 0}
     .credit { position: fixed; right: 10mm; bottom: 8mm; opacity:.8; }
+
+    /* Botones */
+    .btn { background:#0b1430; color:var(--text); border:1px solid var(--grid); border-radius:8px; padding:8px 12px; cursor:pointer; }
+    .btn:hover { border-color:#3153a4; }
+    .controls { display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
   </style>
 </head>
 <body>
@@ -122,6 +126,13 @@
         <h2>Distribución de nuevas incorporaciones por mes</h2>
         <div class="grid" id="incorporaciones"></div>
         <div class="hint">Los nuevos permanecen 6 meses en prueba y luego pasan a Kynflex automáticamente.</div>
+
+        <!-- Controles de almacenamiento local -->
+        <div class="controls">
+          <button id="clearStorage" class="btn">Borrar datos guardados</button>
+          <button id="regenA" class="btn">Regenerar semana estimada (A)</button>
+          <span class="muted">Los cambios se guardan automáticamente en este navegador.</span>
+        </div>
       </div>
     </section>
 
@@ -168,7 +179,7 @@
     <span class="muted">Supuestos: Kynflex concentra presencialidad en Mar/Mi/Ju; el % presencial se reparte proporcionalmente. Vacaciones aplican como reducción de asistencia a toda la plantilla en los periodos indicados. Puedes ajustar todos los parámetros.</span>
   </footer>
 
-    <!-- Crédito discreto -->
+  <!-- Crédito discreto -->
   <div class="credit">Creado por <b>David Esteva Jiménez</b> — 2025</div>
 
   <script>
@@ -180,26 +191,35 @@
       return n;
     }
 
-    // Construye inputs de incorporaciones por mes
-    function buildIncInputs(){
-      const cont = document.getElementById('incorporaciones');
-      cont.innerHTML = '';
-      for (let m=0; m<12; m++){
-        const wrap = document.createElement('div');
-        const lab = document.createElement('label');
-        lab.textContent = `Nuevos en ${mesesN[m]}`;
-        const inp = document.createElement('input');
-        inp.type = 'number';
-        inp.min = '0'; inp.step = '1';
-        // Por defecto: 0 salvo marzo = nuevosTotal
-        const base = (m===2) ? +document.getElementById('nuevosTotal').value : 0;
-        inp.value = base;
-        inp.id = `new_${m}`;
-        inp.addEventListener('input', recalc);
-        wrap.appendChild(lab); wrap.appendChild(inp);
-        cont.appendChild(wrap);
-      }
+    // --- Utilidades de rangos y colores ---
+    const RANGOS_SEMANA = {
+      1: [130,140], // Lunes
+      2: [171,200], // Martes (>170 y ≤200)
+      3: [181,225], // Miércoles (>180 y ≤225, debe ser el pico)
+      4: [171,200], // Jueves (>170 y ≤200)
+      5: [130,140], // Viernes
+    };
+    function randRange(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
+
+    // Semanal: verde <120, naranja 120–180, rojo >=180
+    function classWeekly(v){
+      if (v >= 180) return 'danger';
+      if (v >= 120) return 'warn';
+      return 'ok';
     }
+    // Mensual: verde <120, naranja 120–170, rojo >170
+    function classMonthly(v){
+      if (v > 170) return 'danger';
+      if (v >= 120) return 'warn';
+      return 'ok';
+    }
+    function colorVarFromClass(cls){
+      return cls==='danger' ? 'var(--bad)' : (cls==='warn' ? 'var(--warn)' : 'var(--good)');
+    }
+
+    // --- Almacenamiento local ---
+    const STORAGE_KEY = 'sim_oficina_v2';
+    let WEEKLY_A_OCC = null; // cache de ocupación semanal A (solo los valores, no dependen de nuevas incorporaciones)
 
     function getNewPerMonth(){
       const arr = new Array(12).fill(0);
@@ -210,10 +230,65 @@
       return arr;
     }
 
-    // Cuenta días laborales de un mes y devuelve un array de fechas por día de la semana (1..5)
+    function saveState(){
+      const state = {
+        capacidad: +document.getElementById('capacidad').value,
+        anio: +document.getElementById('anio').value,
+        total: +document.getElementById('total').value,
+        prueba: +document.getElementById('prueba').value,
+        porc: +document.getElementById('porc').value,
+        dist: +document.getElementById('dist').value,
+        vacVerano: +document.getElementById('vacVerano').value,
+        vacNavidad: +document.getElementById('vacNavidad').value,
+        nuevosTotal: +document.getElementById('nuevosTotal').value,
+        nuevosPorMes: getNewPerMonth(),
+        weeklyAOcc: WEEKLY_A_OCC
+      };
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { console.warn('No se pudo guardar en localStorage:', e); }
+    }
+
+    function loadState(){
+      try{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        const s = JSON.parse(raw);
+        const ids = ['capacidad','anio','total','prueba','porc','dist','vacVerano','vacNavidad','nuevosTotal'];
+        ids.forEach(id => { if (s[id] !== undefined) document.getElementById(id).value = s[id]; });
+        buildIncInputs();
+        if (Array.isArray(s.nuevosPorMes)){
+          for (let m=0; m<12; m++){
+            const el = document.getElementById(`new_${m}`);
+            if (el) el.value = s.nuevosPorMes[m] ?? 0;
+          }
+        }
+        WEEKLY_A_OCC = Array.isArray(s.weeklyAOcc) ? s.weeklyAOcc : null;
+        document.getElementById('distLabel').textContent = `${document.getElementById('dist').value}%`;
+      }catch(e){ console.warn('No se pudo cargar estado desde localStorage:', e); }
+    }
+
+    function clearState(){
+      try{ localStorage.removeItem(STORAGE_KEY); alert('Datos locales borrados para este simulador.'); }
+      catch(e){ console.warn('No se pudo borrar localStorage:', e); }
+    }
+
+    // Construye inputs de incorporaciones por mes
+    function buildIncInputs(){
+      const cont = document.getElementById('incorporaciones'); cont.innerHTML = '';
+      for (let m=0; m<12; m++){
+        const wrap = document.createElement('div');
+        const lab = document.createElement('label'); lab.textContent = `Nuevos en ${mesesN[m]}`;
+        const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.step = '1';
+        const base = (m===2) ? +document.getElementById('nuevosTotal').value : 0; // por defecto todo en marzo
+        inp.value = base; inp.id = `new_${m}`;
+        // Al cambiar distribución, NO regenerar A (preservar A), sólo recalcular B/mensual
+        inp.addEventListener('input', () => { recalc({preserveWeeklyA:true}); saveState(); });
+        wrap.appendChild(lab); wrap.appendChild(inp); cont.appendChild(wrap);
+      }
+    }
+
+    // Utils: fechas laborales
     function workingDates(year, month){
       const res = {1:[],2:[],3:[],4:[],5:[]};
-      const d0 = new Date(year, month, 1);
       for (let d=1; d<=31; d++){
         const dt = new Date(year, month, d);
         if (dt.getMonth() !== month) break;
@@ -222,42 +297,106 @@
       }
       return res;
     }
+    function monthsArray(year){ return Array.from({length:12}, (_,m)=>({m, fechas: workingDates(year,m)})); }
 
-    function monthsArray(year){
-      return Array.from({length:12}, (_,m)=>({m, fechas: workingDates(year,m)}));
+    // Semana A estimada (rangos) -> genera sólo una vez, salvo que se regenere explícitamente o cambien parámetros base
+    function generateWeeklyAOcc(){
+      const occ = [
+        randRange(...RANGOS_SEMANA[1]),
+        randRange(...RANGOS_SEMANA[2]),
+        randRange(...RANGOS_SEMANA[3]),
+        randRange(...RANGOS_SEMANA[4]),
+        randRange(...RANGOS_SEMANA[5])
+      ];
+      const maxOtros = Math.max(occ[0],occ[1],occ[3],occ[4]);
+      if (occ[2] <= maxOtros){ const [, maxW] = RANGOS_SEMANA[3]; occ[2] = Math.min(maxW, maxOtros + 1 + Math.floor(Math.random()*3)); }
+      return occ;
     }
 
-    function computeScenarioWeekly(params){
+    function buildWeeklyModelFromOcc(occ, capacidad){
+      const weekSum = occ.reduce((a,b)=>a+b,0);
+      const dailyAvg = weekSum/5;
+      const peakIdx = occ.indexOf(Math.max(...occ));
+      const free = occ.map(v => capacidad - v);
+      return {occ, free, dailyAvg, weeklyTotal: weekSum, peakIdx, capacidad};
+    }
+
+    // Semana B real (SIN tope)
+    function computeScenarioWeeklyReal(params){
       const {capacidad,total,prueba,porc,dist} = params;
       const K = Math.max(0, total - prueba);
-      const weeklyOnsiteDaysPerK = 5 * (porc/100); // p.ej., 2 si 40%
-      const p = dist/100; // % de Mar+Mié
-      // Pesos: Mar=p, Mi=1, Ju=1-p; Lu=0, Vi=0
+      const weeklyOnsiteDaysPerK = 5 * (porc/100);
+      const p = dist/100; // % Mar+Mié
       const weights = [0, p, 1, (1-p), 0];
       const sumW = weights.reduce((a,b)=>a+b,0) || 1;
       const kynflexPerDay = weights.map(w => K * (weeklyOnsiteDaysPerK * (w/sumW)));
       const probationPerDay = Array(5).fill(prueba);
       const occ = days.map((_,i)=> Math.round(probationPerDay[i] + kynflexPerDay[i]));
-      const weekSum = occ.reduce((a,b)=>a+b,0);
-      const dailyAvg = weekSum/5;
-      const peakIdx = occ.indexOf(Math.max(...occ));
-      const free = occ.map(v => capacidad - v);
-      return {K, occ, free, dailyAvg, weeklyTotal: weekSum, peakIdx, capacidad};
+      return buildWeeklyModelFromOcc(occ, capacidad);
     }
 
+    // Vacaciones
+    function vacationFactor(date, vacVerano, vacNavidad){
+      const m = date.getMonth(); const d = date.getDate(); let f = 0;
+      if (m===6 || m===7) f = vacVerano/100; // Jul/Ago
+      if ((m===11 && d>=16) || (m===0 && d<=7)) f = Math.max(f, vacNavidad/100); // Navidad
+      return f;
+    }
+
+    // Ocupación diaria con nuevas incorporaciones (6 meses en prueba)
+    function occupancyForDate(date, params, newPerMonth){
+      const {total, prueba, porc, dist} = params; const year = date.getFullYear();
+      let nuevosEnPrueba = 0; let nuevosTotales = 0;
+      for (let m=0; m<12; m++){
+        const n = newPerMonth[m]||0; if (n<=0) continue; nuevosTotales += n;
+        const start = new Date(year, m, 1); const endProb = new Date(year, m+6, 1);
+        if (date >= start && date < endProb){ nuevosEnPrueba += n; }
+      }
+      const pruebaAct = prueba + nuevosEnPrueba;
+      const totalAct  = total + nuevosTotales;
+      const Kbase     = Math.max(0, totalAct - pruebaAct);
+      const p = dist/100; const weights = [0,p,1,(1-p),0]; const sumW = weights.reduce((a,b)=>a+b,0)||1;
+      const wd = date.getDay(); const weeklyOnsiteDaysPerK = 5 * (porc/100);
+      const kToday = (wd>=1 && wd<=5) ? Kbase * (weeklyOnsiteDaysPerK * (weights[wd-1]/sumW)) : 0;
+      const pruebaToday = (wd>=1 && wd<=5) ? pruebaAct : 0;
+      let occ = Math.round(kToday + pruebaToday);
+      return {occ, pruebaAct, Kbase};
+    }
+
+    // Mensual
+    function computeMonthly(params, year, vacVerano, vacNavidad, newPerMonth, {cap225}){
+      const months = monthsArray(year);
+      const perMonth = months.map(({m, fechas})=>{
+        let totalDays = 0; let sumOcc = 0; let peak = 0; let picoDia = null; let occByDay = {1:0,2:0,3:0,4:0,5:0};
+        for (let wd=1; wd<=5; wd++){
+          const arr = fechas[wd];
+          for (const dt of arr){
+            const vacF = vacationFactor(dt, vacVerano, vacNavidad);
+            const {occ} = occupancyForDate(dt, params, newPerMonth);
+            let occAdj = Math.round(occ * (1 - vacF));
+            if (cap225) occAdj = Math.min(occAdj, 225); // sólo A
+            sumOcc += occAdj; totalDays += 1; occByDay[wd] += occAdj;
+            if (occAdj > peak){ peak = occAdj; picoDia = new Date(dt); }
+          }
+        }
+        const dailyAvg = totalDays ? (sumOcc/totalDays) : 0;
+        return {monthIndex:m, nombre: mesesN[m], dailyAvg, peak, picoDia, occByDay};
+      });
+      return perMonth;
+    }
+
+    // Renderizaciones
     function renderTable(el, model){
       const {occ, capacidad} = model;
       const headers = `<tr><th>Día</th><th>Ocupación</th><th>Barra</th><th>Puestos libres</th></tr>`;
       const rows = occ.map((v,i)=>{
         const ratio = Math.max(0, Math.min(1, v/capacidad));
-        let color = 'var(--ok)';
-        if (v > capacidad) color = 'var(--bad)';
-        else if (v > capacidad*0.85) color = 'var(--warn)';
-        else color = 'var(--good)';
+        const cls = classWeekly(v);
+        const color = (cls==='danger') ? 'var(--bad)' : (cls==='warn' ? 'var(--warn)' : 'var(--good)');
         const bar = `<div class="bar"><span style="width:${Math.min(100, ratio*100)}%; background:${color};"></span></div>`;
         const libres = capacidad - v;
         const libreStr = libres >= 0 ? `${fmt(libres)}` : `<span class="tag danger">Faltan ${fmt(-libres)}</span>`;
-        return `<tr><td>${days[i]}</td><td>${fmt(v)}</td><td>${bar}</td><td>${libreStr}</td></tr>`;
+        return `<tr><td>${days[i]}</td><td><span class="tag ${cls}">${fmt(v)}</span></td><td>${bar}</td><td>${libreStr}</td></tr>`;
       }).join('');
       el.innerHTML = headers + rows;
     }
@@ -265,79 +404,12 @@
     function renderKPIs(el, model){
       const {occ, dailyAvg, peakIdx, capacidad} = model;
       const peakVal = occ[peakIdx];
-      const peakTag = peakVal>capacidad ? `<span class='tag danger'>${fmt(peakVal)} / ${fmt(capacidad)}</span>` : `${fmt(peakVal)} / ${fmt(capacidad)}`;
+      const peakTag = `<span class='tag ${classWeekly(peakVal)}'>${fmt(peakVal)} / ${fmt(capacidad)}</span>`;
       el.innerHTML = `
         <div class="item"><div class="label">Pico de ocupación</div><div class="value">${days[peakIdx]} · ${peakTag}</div></div>
-        <div class="item"><div class="label">Media diaria (semana tipo)</div><div class="value">${fmt(dailyAvg.toFixed(1))}</div></div>
+        <div class="item"><div class="label">Media diaria (semana tipo)</div><div class="value"><span class="tag ${classWeekly(dailyAvg)}">${fmt(dailyAvg.toFixed(1))}</span></div></div>
         <div class="item"><div class="label">Distribución Kynflex</div><div class="value">Mar+Mié: ${(document.getElementById('dist').value)}% · Mié+Jue: ${(100-document.getElementById('dist').value)}%</div></div>
       `;
-    }
-
-    // Vacaciones: devuelve factor (0..1) de reducción para una fecha
-    function vacationFactor(date, vacVerano, vacNavidad){
-      const m = date.getMonth();
-      const d = date.getDate();
-      let f = 0;
-      if (m===6 || m===7){ // Jul(6), Ago(7)
-        f = vacVerano/100;
-      }
-      // 2ª quincena de dic (>=16) y 1ª semana de ene (<=7)
-      if ((m===11 && d>=16) || (m===0 && d<=7)){
-        f = Math.max(f, vacNavidad/100);
-      }
-      return f;
-    }
-
-    // Ocupación diaria con dinámica de nuevas incorporaciones (6 meses en prueba)
-    function occupancyForDate(date, params, newPerMonth){
-      const {total, prueba, porc, dist} = params;
-      const year = date.getFullYear();
-      const month = date.getMonth();
-      // Calcular nuevos en prueba activos en esta fecha (han comenzado y no han cumplido 6 meses)
-      let nuevosEnPrueba = 0; let nuevosYaK = 0; let nuevosTotales = 0;
-      for (let m=0; m<12; m++){
-        const n = newPerMonth[m]||0; if (n<=0) continue; nuevosTotales += n;
-        // Fecha inicio = primer día del mes m
-        const start = new Date(year, m, 1);
-        const endProb = new Date(year, m+6, 1); // fin de prueba al llegar al mes m+6
-        if (date >= start && date < endProb){
-          nuevosEnPrueba += n;
-        } else if (date >= endProb){
-          nuevosYaK += n;
-        }
-      }
-      const pruebaAct = prueba + nuevosEnPrueba; // todos los de prueba 100% presencial salvo vacaciones
-      const totalAct = total + nuevosTotales;     // total del año con incorporaciones
-      const Kbase = Math.max(0, totalAct - pruebaAct); // Kynflex incluyendo quienes ya pasaron la prueba
-
-      // Distribución Kynflex por día de la semana
-      const p = dist/100; const weights = [0,p,1,(1-p),0]; const sumW = weights.reduce((a,b)=>a+b,0)||1;
-      const wd = date.getDay(); // 1..5
-      const weeklyOnsiteDaysPerK = 5 * (porc/100);
-      const kToday = (wd>=1 && wd<=5) ? Kbase * (weeklyOnsiteDaysPerK * (weights[wd-1]/sumW)) : 0;
-      const pruebaToday = (wd>=1 && wd<=5) ? pruebaAct : 0;
-      let occ = Math.round(kToday + pruebaToday);
-      return {occ, pruebaAct, Kbase};
-    }
-
-    function computeMonthly(params, year, vacVerano, vacNavidad, newPerMonth){
-      const months = monthsArray(year);
-      const perMonth = months.map(({m, fechas})=>{
-        let totalDays = 0; let sumOcc = 0; let peak = 0; let picoDia = null; let overDays = 0; let occByDay = {1:0,2:0,3:0,4:0,5:0};
-        for (let wd=1; wd<=5; wd++){
-          const arr = fechas[wd];
-          for (const dt of arr){
-            const vacF = vacationFactor(dt, vacVerano, vacNavidad);
-            const {occ} = occupancyForDate(dt, params, newPerMonth);
-            const occAdj = Math.round(occ * (1 - vacF));
-            sumOcc += occAdj; totalDays += 1; occByDay[wd] += occAdj;
-            if (occAdj > peak){peak = occAdj; picoDia = new Date(dt);}            
-          }
-        }
-        const dailyAvg = totalDays ? (sumOcc/totalDays) : 0;
-        return {monthIndex:m, nombre: mesesN[m], dailyAvg, peak, picoDia, overDays, occByDay};
-      });
-      return perMonth;
     }
 
     function renderMonths(el, list, capacidad){
@@ -345,22 +417,21 @@
       list.forEach(m => {
         const div = document.createElement('div'); div.className = 'mini';
         const h = document.createElement('h3'); h.textContent = m.nombre; div.appendChild(h);
+        const avgCls = classMonthly(m.dailyAvg);
         const avg = document.createElement('div'); avg.className='row';
-        avg.innerHTML = `<span class='muted'>Media diaria</span><span>${fmt(m.dailyAvg.toFixed(1))}</span>`; div.appendChild(avg);
+        avg.innerHTML = `<span class='muted'>Media diaria</span><span><span class='tag ${avgCls}'>${fmt(m.dailyAvg.toFixed(1))}</span></span>`; div.appendChild(avg);
+        const peakCls = classMonthly(m.peak);
         const peak = document.createElement('div'); peak.className='row';
-        const tag = (m.peak>capacidad) ? `<span class='tag danger'>${fmt(m.peak)} / ${fmt(capacidad)}</span>` : `${fmt(m.peak)} / ${fmt(capacidad)}`;
-        peak.innerHTML = `<span class='muted'>Pico mensual</span><span>${tag}</span>`; div.appendChild(peak);
+        peak.innerHTML = `<span class='muted'>Pico mensual</span><span><span class='tag ${peakCls}'>${fmt(m.peak)} / ${fmt(capacidad)}</span></span>`; div.appendChild(peak);
         const hint = document.createElement('div'); hint.className='hint';
-        hint.textContent = (m.picoDia) ? `Día pico: ${m.picoDia.toLocaleDateString('es-ES', {day:'2-digit', month:'short'})}` : '';
-        div.appendChild(hint);
-        // Barra
+        hint.textContent = (m.picoDia) ? `Día pico: ${m.picoDia.toLocaleDateString('es-ES', {day:'2-digit', month:'short'})}` : ''; div.appendChild(hint);
         const barWrap = document.createElement('div'); barWrap.className='bar'; barWrap.style.marginTop='8px';
-        const ratio = Math.min(1, m.peak/capacidad); const span = document.createElement('span'); span.style.width = `${ratio*100}%`;
-        span.style.background = m.peak>capacidad ? 'var(--bad)' : (m.peak>capacidad*0.85 ? 'var(--warn)' : 'var(--good)');
+        const ratio = Math.min(1, (m.dailyAvg/capacidad));
+        const span = document.createElement('span'); span.style.width = `${ratio*100}%`;
+        span.style.background = (avgCls==='danger') ? 'var(--bad)' : (avgCls==='warn' ? 'var(--warn)' : 'var(--good)');
         barWrap.appendChild(span); div.appendChild(barWrap);
         el.appendChild(div);
       });
-      // Ranking de meses por media y por pico
       const byAvg = [...list].sort((a,b)=>b.dailyAvg - a.dailyAvg).slice(0,3);
       const byPeak = [...list].sort((a,b)=>b.peak - a.peak).slice(0,3);
       const rank = document.createElement('div'); rank.className='hint';
@@ -378,7 +449,7 @@
       `;
     }
 
-    function recalc(){
+    function recalc(opts={preserveWeeklyA:false}){
       const capacidad = +document.getElementById('capacidad').value;
       const anio = +document.getElementById('anio').value;
       const total = +document.getElementById('total').value;
@@ -388,15 +459,26 @@
       const vacVerano = +document.getElementById('vacVerano').value;
       const vacNavidad = +document.getElementById('vacNavidad').value;
       const nuevosTotal = +document.getElementById('nuevosTotal').value;
+
       // auto-calc kynflex
       const K = Math.max(0, total - prueba);
       document.getElementById('kynflex').value = K;
-      // etiqueta distribución
       document.getElementById('distLabel').textContent = `${dist}%`;
 
-      // Semanal (base sin calendario ni vacaciones)
-      const base = computeScenarioWeekly({capacidad,total,prueba,porc,dist});
-      const withNewWeekly = computeScenarioWeekly({capacidad,total: total + nuevosTotal,prueba: prueba + nuevosTotal,porc,dist});
+      // Semanal A: conservar si viene de cambios en distribución de nuevas
+      if (!opts.preserveWeeklyA || !Array.isArray(WEEKLY_A_OCC)){
+        WEEKLY_A_OCC = generateWeeklyAOcc();
+      }
+      const base = buildWeeklyModelFromOcc(WEEKLY_A_OCC, capacidad);
+
+      // Semanal B: real, sin tope y debe reflejar más ocupación lógicamente
+      const withNewWeekly = computeScenarioWeeklyReal({
+        capacidad,
+        total: total + nuevosTotal,
+        prueba: prueba + nuevosTotal,
+        porc, dist
+      });
+
       renderKPIs(document.getElementById('kpisA'), base);
       renderTable(document.getElementById('tablaA'), base);
       renderKPIs(document.getElementById('kpisB'), withNewWeekly);
@@ -404,27 +486,34 @@
 
       // Mensual con calendario + vacaciones + distribución de incorporaciones
       const newPerMonth = getNewPerMonth();
-      const monthlyA = computeMonthly({capacidad,total,prueba,porc,dist}, anio, vacVerano, vacNavidad, newPerMonth.map(()=>0));
-      const monthlyB = computeMonthly({capacidad,total,prueba,porc,dist}, anio, vacVerano, vacNavidad, newPerMonth);
+      const monthlyA = computeMonthly({capacidad,total,prueba,porc,dist}, anio, vacVerano, vacNavidad, newPerMonth.map(()=>0), {cap225:true});
+      const monthlyB = computeMonthly({capacidad,total,prueba,porc,dist}, anio, vacVerano, vacNavidad, newPerMonth, {cap225:false});
       renderMonths(document.getElementById('mesesA'), monthlyA, capacidad);
       renderMonths(document.getElementById('mesesB'), monthlyB, capacidad);
 
-      // Capacidad necesaria
+      // Capacidad necesaria (por pico mensual)
       const maxPeakA = Math.max(...monthlyA.map(m=>m.peak));
       const maxPeakB = Math.max(...monthlyB.map(m=>m.peak));
       renderCapNecesaria(document.getElementById('capNecesariaA'), capacidad, maxPeakA);
       renderCapNecesaria(document.getElementById('capNecesariaB'), capacidad, maxPeakB);
+
+      saveState();
     }
 
-    for (const id of ['capacidad','anio','total','prueba','porc','dist','vacVerano','vacNavidad','nuevosTotal']){
-      document.getElementById(id).addEventListener('input', recalc);
-    }
+    // Eventos
+    const inputIds = ['capacidad','anio','total','prueba','porc','dist','vacVerano','vacNavidad'];
+    inputIds.forEach(id => {
+      document.getElementById(id).addEventListener('input', () => { recalc({preserveWeeklyA:false}); });
+    });
+    // Nuevos totales cambia distribución por defecto
+    document.getElementById('nuevosTotal').addEventListener('input', () => { buildIncInputs(); recalc({preserveWeeklyA:true}); saveState(); });
+    document.getElementById('clearStorage').addEventListener('click', () => { clearState(); });
+    document.getElementById('regenA').addEventListener('click', () => { WEEKLY_A_OCC = null; recalc({preserveWeeklyA:false}); });
 
-    // Al cambiar el total de nuevos, reconstuye por defecto la distribución (todo en marzo)
-    document.getElementById('nuevosTotal').addEventListener('input', buildIncInputs);
-
+    // Inicialización
     buildIncInputs();
-    recalc();
+    loadState();
+    recalc({preserveWeeklyA: !!WEEKLY_A_OCC});
   </script>
 </body>
 </html>
