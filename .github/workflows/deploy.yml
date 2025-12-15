@@ -1,0 +1,25 @@
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main   # Cambia si tu rama principal es diferente
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Instalar dependencias
+        run: npm install   # Si usas Node, ajusta según tu proyecto
+
+      - name: Construir proyecto
+        run: npm run build # Ajusta al comando de build de tu proyecto
+
+      - name: Deploy a GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
